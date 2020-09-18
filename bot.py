@@ -94,8 +94,10 @@ async def watch_requests():
 			try:
 				info = json.loads(l.ficInfo)
 				descSoup = BeautifulSoup(info['desc'], 'lxml')
+				infoTime = f'{l.infoRequestMs/1000.0:.3f}s'
+				epubTime = f'{l.epubCreationMs/1000.0:.3f}s'
 				msg = '\n'.join([
-						f'request for <{l.query}> => `{l.urlId}` ({l.infoRequestMs}ms), generated `{l.hash}` ({l.epubCreationMs}ms)',
+						f'request for <{l.query}> => `{l.urlId}` ({infoTime}), generated epub in {epubTime}',
 					])
 				title = f'{info["title"]} by {info["author"]}'
 				desc = '\n'.join([
