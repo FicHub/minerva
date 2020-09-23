@@ -69,6 +69,29 @@ class RequestLog:
 async def on_ready():
 	print('We have logged in as {0.user}'.format(client))
 
+async def sendFicInfo(channel, l):
+	try:
+		url = urllib.parse.urljoin('https://fic.pw/', l.url)
+		info = json.loads(l.ficInfo)
+		descSoup = BeautifulSoup(info['desc'], 'lxml')
+		infoTime = f'{l.infoRequestMs/1000.0:.3f}s'
+		epubTime = f'{l.epubCreationMs/1000.0:.3f}s'
+		msg = f'request for <{l.query}> => `{l.urlId}` ({infoTime})'
+		msg += f', generated epub in {epubTime}'
+		title = f'{info["title"]} by {info["author"]}'
+		desc = '\n'.join([
+				f'{descSoup.get_text()}',
+				f'{info["words"]} words in {info["chapters"]} chapters',
+			])
+		e = discord.Embed(title=title, description=desc, url=url)
+		await channel.send(msg, embed=e)
+		return True
+	except Exception as e:
+		traceback.print_exc()
+		print(e)
+		print('sendFicInfo: error: ^')
+	return False
+
 @client.event
 async def on_message(message):
 	print(json.dumps({"message":{
@@ -98,7 +121,7 @@ async def on_message(message):
 		await message.add_reaction('❌')
 		traceback.print_exc()
 		print(e)
-		print('watch_requests: error: ^')
+		print('error: ^')
 
 	# FIXME why do we need this client param?
 	await message.remove_reaction('👍', client.user)
@@ -111,28 +134,14 @@ async def on_message(message):
 
 	try:
 		l = RequestLog.mostRecentByUrlId(res['urlId'])
-		url = urllib.parse.urljoin('https://fic.pw/', l.url)
-		info = json.loads(l.ficInfo)
-		descSoup = BeautifulSoup(info['desc'], 'lxml')
-		infoTime = f'{l.infoRequestMs/1000.0:.3f}s'
-		epubTime = f'{l.epubCreationMs/1000.0:.3f}s'
-		msg = '\n'.join([
-				f'request for <{l.query}> => `{l.urlId}` ({infoTime}), generated epub in {epubTime}',
-			])
-		title = f'{info["title"]} by {info["author"]}'
-		desc = '\n'.join([
-				f'{descSoup.get_text()}',
-				f'{info["words"]} words in {info["chapters"]} chapters',
-			])
-		e = discord.Embed(title=title, description=desc, url=url)
-		await message.channel.send(msg, embed=e)
+		await sendFicInfo(message.channel, l)
 		await message.add_reaction('✅')
 	except Exception as e:
 		await message.channel.send(f"unable to find lookup result for '{query}'")
 		await message.add_reaction('❌')
 		traceback.print_exc()
 		print(e)
-		print('watch_requests: error: ^')
+		print('error: ^')
 
 def pruneRecent(recent, minutes=15):
 	nr = {}
@@ -169,28 +178,8 @@ async def watch_requests():
 				])
 			await botspam_priv.send(msg)
 
-			if l.isAutomated:
-				continue
-
-			try:
-				info = json.loads(l.ficInfo)
-				descSoup = BeautifulSoup(info['desc'], 'lxml')
-				infoTime = f'{l.infoRequestMs/1000.0:.3f}s'
-				epubTime = f'{l.epubCreationMs/1000.0:.3f}s'
-				msg = '\n'.join([
-						f'request for <{l.query}> => `{l.urlId}` ({infoTime}), generated epub in {epubTime}',
-					])
-				title = f'{info["title"]} by {info["author"]}'
-				desc = '\n'.join([
-						f'{descSoup.get_text()}',
-						f'{info["words"]} words in {info["chapters"]} chapters',
-					])
-				e = discord.Embed(title=title, description=desc, url=url)
-				await request_feed.send(msg, embed=e)
-			except Exception as e:
-				traceback.print_exc()
-				print(e)
-				print('watch_requests: error: ^')
+			if not l.isAutomated:
+				await sendFicInfo(request_feed, l)
 
 	print('watch_requests: ending')
 
