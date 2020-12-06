@@ -11,7 +11,7 @@ from oil import oil
 client = discord.Client()
 db = oil.open()
 
-API_PREFIX = 'https://fic.pw/api/v0/epub?automated=true&q='
+API_PREFIX = 'https://fic.pw/api/v0/epub?q='
 
 def lookup(query: str):
 	import requests
@@ -79,10 +79,13 @@ async def sendFicInfo(channel, l):
 		msg = f'request for <{l.query}> => `{l.urlId}` ({infoTime})'
 		msg += f', generated epub in {epubTime}'
 		title = f'{info["title"]} by {info["author"]}'
-		desc = '\n'.join([
-				f'{descSoup.get_text()}',
-				f'{info["words"]} words in {info["chapters"]} chapters',
-			])
+		# description cannot exceed 2048 bytes
+		desc = f'\n{info["words"]} words in {info["chapters"]} chapters'
+		desc2 = descSoup.get_text()
+		if len(desc2) >= 2040 - len(desc):
+			desc = desc2[:2040] + '...' + desc
+		else:
+			desc = desc2 + desc
 		e = discord.Embed(title=title, description=desc, url=url)
 		await channel.send(msg, embed=e)
 		return True
@@ -171,12 +174,24 @@ async def watch_requests():
 			recentHashes[l.hash] = l.created
 
 			url = urllib.parse.urljoin('https://fic.pw/', l.url)
-			msg = '\n'.join([
-					f'request for <{l.query}> => `{l.urlId}` ({l.infoRequestMs}ms)',
-					f'```{l.ficInfo}``` ({l.epubCreationMs}ms)',
-					f'<{url}> (`{l.hash}`)',
-				])
-			await botspam_priv.send(msg)
+			m1 = f'request for <{l.query}> => `{l.urlId}` ({l.infoRequestMs}ms)'
+			m2 = f'`````` ({l.epubCreationMs}ms)'
+			m3 = f'<{url}> (`{l.hash}`)'
+			msg = '\n'.join([m1, m2, m3])
+
+			leftover = 2000 - len(msg) - 16
+			lfi = l.ficInfo[0:leftover]
+			m2 = f'```{lfi}``` ({l.epubCreationMs}ms)'
+			msg = '\n'.join([m1, m2, m3])
+
+			try:
+				await botspam_priv.send(msg)
+			except Exception as e:
+				traceback.print_exc()
+				print(e)
+				print('watch_requests: error: ^')
+				print(f'watch_requests: msg len: {len(msg)}')
+				print(msg)
 
 			if not l.isAutomated:
 				await sendFicInfo(request_feed, l)
