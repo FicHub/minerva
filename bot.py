@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 import json
 import traceback
 import urllib.parse
@@ -146,7 +147,7 @@ async def on_message(message):
 		print(e)
 		print('error: ^')
 
-def pruneRecent(recent, minutes=15):
+def pruneRecent(recent, minutes=60*24*30):
 	nr = {}
 	old = (datetime.datetime.now() - datetime.timedelta(minutes=minutes))
 	for key in recent:
@@ -155,12 +156,28 @@ def pruneRecent(recent, minutes=15):
 		nr[key] = recent[key]
 	return nr
 
+def initHashes(maxId: int):
+	recentHashes = {}
+	for l in RequestLog.fetchAfter(0):
+		if l.id > maxId:
+			continue
+		if l.hash not in recentHashes:
+			recentHashes[l.hash] = l.created
+		recentHashes[l.hash] = max(l.created, recentHashes[l.hash])
+	return recentHashes
+
 async def watch_requests():
 	await client.wait_until_ready()
 	botspam_priv = client.get_channel(754481638695501866) # #botspam-priv
 	request_feed = client.get_channel(754779814740754492) # #request-feed
 	maxId = RequestLog.maxId()
-	recentHashes = {}
+	if len(sys.argv) > 1 and sys.argv[1].isnumeric():
+		maxId = int(sys.argv[1])
+		print(f'set maxId to {maxId} from cli')
+	recentHashes = initHashes(maxId)
+	print(f'recentHashes after  init: {len(recentHashes)}')
+	recentHashes = pruneRecent(recentHashes)
+	print(f'recentHashes after prune: {len(recentHashes)}')
 	await botspam_priv.send('started up')
 	while not client.is_closed():
 		recentHashes = pruneRecent(recentHashes)
@@ -195,6 +212,8 @@ async def watch_requests():
 
 			if not l.isAutomated:
 				await sendFicInfo(request_feed, l)
+
+			await asyncio.sleep(1)
 
 	print('watch_requests: ending')
 
