@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from typing import Dict
 import sys
 import json
 import traceback
@@ -23,20 +24,40 @@ def lookup(query: str):
 	except:
 		return {'error':-1,'msg':'lookup failed :('}
 
-class RequestLog:
-	def __init__(self, id_, created_, infoRequestMs_, epubCreationMs_, urlId_,
-			query_, ficInfo_, epubFileName_, hash_, url_, isAutomated_):
+class RequestSource:
+	def __init__(self, id_, created_, isAutomated_, route_, description_):
 		self.id = id_
 		self.created = created_
-		self.infoRequestMs = infoRequestMs_
-		self.epubCreationMs = epubCreationMs_
-		self.urlId = urlId_
-		self.query = query_
-		self.ficInfo = ficInfo_
-		self.epubFileName = epubFileName_
-		self.hash = hash_
-		self.url = url_
 		self.isAutomated = isAutomated_
+		self.route = route_
+		self.description = description_
+
+	@staticmethod
+	def select(id_: int) -> 'RequestSource':
+		with oil.open() as db, db.cursor() as curs:
+			curs.execute('''
+				select rs.id, rs.created, rs.isAutomated, rs.route, rs.description
+				from requestSource rs
+				where rs.id = %s
+			''', (id_,))
+			r = curs.fetchone()
+			return None if r is None else RequestSource(*r)
+
+class RequestLog:
+	def __init__(self, id_, created_, sourceId_, etype_, query_, infoRequestMs_,
+			urlId_, ficInfo_, exportMs_, exportFileName_, exportFileHash_, url_):
+		self.id = id_
+		self.created = created_
+		self.sourceId = sourceId_
+		self.etype = etype_
+		self.query = query_
+		self.infoRequestMs = infoRequestMs_
+		self.urlId = urlId_
+		self.ficInfo = ficInfo_
+		self.exportMs = exportMs_
+		self.exportFileName = exportFileName_
+		self.exportFileHash = exportFileHash_
+		self.url = url_
 
 	@staticmethod
 	def maxId() -> int:
@@ -49,7 +70,12 @@ class RequestLog:
 	@staticmethod
 	def fetchAfter(after):
 		with db.cursor() as curs:
-			curs.execute('select * from requestLog where id > %s', (after,))
+			curs.execute('''
+				select r.id, r.created, r.sourceId, r.etype, r.query, r.infoRequestMs,
+					r.urlId, r.ficInfo, r.exportMs, r.exportFileName, r.exportFileHash,
+					r.url
+				from requestLog r
+				where id > %s''', (after,))
 			ls = [RequestLog(*r) for r in curs.fetchall()]
 			return ls
 		return []
@@ -58,7 +84,10 @@ class RequestLog:
 	def mostRecentByUrlId(urlId):
 		with db.cursor() as curs:
 			curs.execute('''
-			select * from requestLog
+			select r.id, r.created, r.sourceId, r.etype, r.query, r.infoRequestMs,
+				r.urlId, r.ficInfo, r.exportMs, r.exportFileName, r.exportFileHash,
+				r.url
+			from requestLog r
 			where urlId = %s
 			order by created desc limit 1''', (urlId,))
 			r = curs.fetchone()
@@ -76,9 +105,9 @@ async def sendFicInfo(channel, l):
 		info = json.loads(l.ficInfo)
 		descSoup = BeautifulSoup(info['desc'], 'lxml')
 		infoTime = f'{l.infoRequestMs/1000.0:.3f}s'
-		epubTime = f'{l.epubCreationMs/1000.0:.3f}s'
-		msg = f'request for <{l.query}> => `{l.urlId}` ({infoTime})'
-		msg += f', generated epub in {epubTime}'
+		exportTime = f'{l.exportMs/1000.0:.3f}s'
+		msg = f'request for <{info["source"]}> => `{l.urlId}` ({infoTime})'
+		msg += f', generated {l.etype} in {exportTime}'
 		title = f'{info["title"]} by {info["author"]}'
 		# description cannot exceed 2048 bytes
 		desc = f'\n{info["words"]} words in {info["chapters"]} chapters'
@@ -95,6 +124,38 @@ async def sendFicInfo(channel, l):
 		print(e)
 		print('sendFicInfo: error: ^')
 	return False
+
+async def sendDevFicInfo(channel, l: RequestLog):
+	url = urllib.parse.urljoin('https://fic.pw/', l.url)
+	m1 = f'request for {l.etype} of <{l.query}> => `{l.urlId}` ({l.infoRequestMs}ms)'
+	m2 = f'`````` ({l.exportMs}ms)'
+	m3 = f'<{url}> (`{l.exportFileHash}`)'
+	msg = '\n'.join([m1, m2, m3])
+
+	leftover = 1800 - len(msg) - 16
+	lfi = l.ficInfo[0:leftover]
+	m2 = f'```{lfi}``` ({l.exportMs}ms)'
+	msg = '\n'.join([m1, m2, m3])
+
+	try:
+		await channel.send(msg)
+	except Exception as e:
+		traceback.print_exc()
+		print(e)
+		print('sendDevFicInfo: error: ^')
+
+async def sendErrorLog(channel, l: RequestLog):
+	print(f'failed request {l.id}')
+	try:
+		msg = f'failed request {l.id}: ```' + str(l.__dict__)
+		while len(msg) > 1800:
+			await channel.send(msg[:1800] + '```')
+			msg = '```' + msg[1800:]
+		await channel.send(msg + '```')
+	except Exception as e:
+		traceback.print_exc()
+		print(e)
+		print('sendErrorLog: error: unable to report error :( ^')
 
 @client.event
 async def on_message(message):
@@ -157,19 +218,22 @@ def pruneRecent(recent, minutes=60*24*30):
 	return nr
 
 def initHashes(maxId: int):
-	recentHashes = {}
+	recentHashes: Dict[str, int] = {}
 	for l in RequestLog.fetchAfter(0):
+		h = l.exportFileHash
 		if l.id > maxId:
 			continue
-		if l.hash not in recentHashes:
-			recentHashes[l.hash] = l.created
-		recentHashes[l.hash] = max(l.created, recentHashes[l.hash])
+		if h not in recentHashes:
+			recentHashes[h] = l.created
+		recentHashes[h] = max(l.created, recentHashes[h])
 	return recentHashes
 
 async def watch_requests():
 	await client.wait_until_ready()
 	botspam_priv = client.get_channel(754481638695501866) # #botspam-priv
+	botspam_err  = client.get_channel(785868128096747540) # #botspam-err
 	request_feed = client.get_channel(754779814740754492) # #request-feed
+
 	maxId = RequestLog.maxId()
 	if len(sys.argv) > 1 and sys.argv[1].isnumeric():
 		maxId = int(sys.argv[1])
@@ -178,39 +242,32 @@ async def watch_requests():
 	print(f'recentHashes after  init: {len(recentHashes)}')
 	recentHashes = pruneRecent(recentHashes)
 	print(f'recentHashes after prune: {len(recentHashes)}')
+
 	await botspam_priv.send('started up')
 	while not client.is_closed():
 		recentHashes = pruneRecent(recentHashes)
 
 		await asyncio.sleep(3)
 		ls = RequestLog.fetchAfter(maxId)
+		if len(ls) > 0:
+			print(f'len(ls): {len(ls)}')
 		for l in ls:
 			maxId = max(maxId, l.id)
-			if l.hash in recentHashes:
+			if l.exportFileHash is not None:
+				if l.exportFileHash in recentHashes:
+					continue
+				else:
+					recentHashes[l.exportFileHash] = l.created
+
+			print(f'requestId: {l.id}')
+			if l.exportFileHash is None:
+				await sendErrorLog(botspam_err, l)
 				continue
-			recentHashes[l.hash] = l.created
 
-			url = urllib.parse.urljoin('https://fic.pw/', l.url)
-			m1 = f'request for <{l.query}> => `{l.urlId}` ({l.infoRequestMs}ms)'
-			m2 = f'`````` ({l.epubCreationMs}ms)'
-			m3 = f'<{url}> (`{l.hash}`)'
-			msg = '\n'.join([m1, m2, m3])
+			await sendDevFicInfo(botspam_priv, l)
 
-			leftover = 2000 - len(msg) - 16
-			lfi = l.ficInfo[0:leftover]
-			m2 = f'```{lfi}``` ({l.epubCreationMs}ms)'
-			msg = '\n'.join([m1, m2, m3])
-
-			try:
-				await botspam_priv.send(msg)
-			except Exception as e:
-				traceback.print_exc()
-				print(e)
-				print('watch_requests: error: ^')
-				print(f'watch_requests: msg len: {len(msg)}')
-				print(msg)
-
-			if not l.isAutomated:
+			rs = RequestSource.select(l.sourceId)
+			if not rs.isAutomated:
 				await sendFicInfo(request_feed, l)
 
 			await asyncio.sleep(1)
