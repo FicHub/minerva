@@ -5,10 +5,10 @@ import json
 import traceback
 import urllib.parse
 import datetime
-from bs4 import BeautifulSoup
-import discord
+from bs4 import BeautifulSoup # type: ignore
+import discord # type: ignore
 import asyncio
-from oil import oil
+from oil import oil # type: ignore
 
 client = discord.Client()
 db = oil.open()
@@ -99,7 +99,10 @@ class RequestLog:
 async def on_ready():
 	print('We have logged in as {0.user}'.format(client))
 
-async def sendFicInfo(channel, l):
+def escape_msg(msg: str) -> str:
+	return discord.utils.escape_mentions(discord.utils.escape_markdown(msg))
+
+async def sendFicInfo(channel, l: RequestLog):
 	try:
 		url = urllib.parse.urljoin('https://fichub.net/', l.url)
 		info = json.loads(l.ficInfo)
@@ -108,12 +111,12 @@ async def sendFicInfo(channel, l):
 		exportTime = f'{l.exportMs/1000.0:.3f}s'
 		msg = f'request for <{info["source"]}> => `{l.urlId}` ({infoTime})'
 		msg += f', generated {l.etype} in {exportTime}'
-		title = f'{info["title"]} by {info["author"]}'
+		title = escape_msg(f'{info["title"]} by {info["author"]}')
 		# description cannot exceed 2048 bytes
 		desc = f'\n{info["words"]} words in {info["chapters"]} chapters'
-		desc2 = descSoup.get_text()
+		desc2 = escape_msg(descSoup.get_text())
 		if len(desc2) >= 2040 - len(desc):
-			desc = desc2[:2040] + '...' + desc
+			desc = desc2[:2040 - len(desc)] + '...' + desc
 		else:
 			desc = desc2 + desc
 		e = discord.Embed(title=title, description=desc, url=url)
