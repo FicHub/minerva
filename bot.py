@@ -13,7 +13,7 @@ from oil import oil
 client = discord.Client()
 db = oil.open()
 
-API_PREFIX = 'https://fic.pw/api/v0/epub?q='
+API_PREFIX = 'https://fichub.net/api/v0/epub?q='
 
 def lookup(query: str):
 	import requests
@@ -101,7 +101,7 @@ async def on_ready():
 
 async def sendFicInfo(channel, l):
 	try:
-		url = urllib.parse.urljoin('https://fic.pw/', l.url)
+		url = urllib.parse.urljoin('https://fichub.net/', l.url)
 		info = json.loads(l.ficInfo)
 		descSoup = BeautifulSoup(info['desc'], 'lxml')
 		infoTime = f'{l.infoRequestMs/1000.0:.3f}s'
@@ -126,7 +126,7 @@ async def sendFicInfo(channel, l):
 	return False
 
 async def sendDevFicInfo(channel, l: RequestLog):
-	url = urllib.parse.urljoin('https://fic.pw/', l.url)
+	url = urllib.parse.urljoin('https://fichub.net/', l.url)
 	m1 = f'request for {l.etype} of <{l.query}> => `{l.urlId}` ({l.infoRequestMs}ms)'
 	m2 = f'`````` ({l.exportMs}ms)'
 	m3 = f'<{url}> (`{l.exportFileHash}`)'
