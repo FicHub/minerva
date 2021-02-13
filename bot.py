@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from typing import Dict
+import re
 import sys
 import json
 import traceback
@@ -21,11 +22,21 @@ ETYPE_COLORS = {
 	}
 
 API_PREFIX = 'https://fichub.net/api/v0/epub?q='
+API_AUTO_PREFIX = 'https://fichub.net/api/v0/epub?automated=true&q='
 
 def lookup(query: str):
 	import requests
 	try:
 		req = requests.get(API_PREFIX + query)
+		res = req.json()
+		return res
+	except:
+		return {'error':-1,'msg':'lookup failed :('}
+
+def automatedLookup(query: str):
+	import requests
+	try:
+		req = requests.get(API_AUTO_PREFIX + query)
 		res = req.json()
 		return res
 	except:
@@ -187,6 +198,66 @@ async def delerr(msg) -> None:
 	await msg.channel.send(f'deleted {cnt} matching messages')
 	return
 
+async def cleanup_retry(chan, q) -> int:
+	print(f'cleanup_retry({q})')
+	try:
+		lr = automatedLookup(q)
+		if 'err' in lr and int(lr['err']) != 0:
+			return 0
+		if 'error' in lr and int(lr['error']) != 0:
+			return 0
+	except:
+		return 0
+	print(f'cleanup_retry({q}): now successful, deleting old errors')
+	cnt=await delerr_q(chan, f", 'query': '{q}', ")
+	print(f'cleanup_retry({q}): now successful, deleted {cnt} old errors')
+	return cnt
+
+async def cleanup(msg) -> None:
+	prefix = '!cleanup'
+	if not msg.content.startswith(prefix):
+		return
+	validPrefixes = [
+			'www.fanfiction.net/s/',
+			'm.fanfiction.net/s/',
+			'fanfiction.net/s/',
+			'www.fictionpress.com/s/',
+			'm.fictionpress.com/s/',
+			'archiveofourown.org/works/',
+			'forums.sufficientvelocity.com/threads',
+			'forums.spacebattles.com/threads',
+			'forum.questionablequesting.com/threads',
+			'www.royalroad.com/fiction/',
+			'royalroad.com/fiction/',
+			'harrypotterfanfiction.com/',
+			'(?:[^\.]*).adult-fanfiction.org/story.php?'
+		]
+	toRecheck = set()
+	toRecheckList = []
+	msgCount = 0
+	async for pm in msg.channel.history(limit=500):
+		if pm.author != client.user:
+			continue
+		for vp in validPrefixes:
+			for proto in ['', 'https://', 'http://']:
+				rr = re.match(f".*'epub', 'query': '({proto}{vp}[^']*)', .*", pm.content)
+				if rr is None:
+					continue
+				query = rr.group(1)
+				msgCount += 1
+				if query in toRecheck:
+					continue
+				toRecheck |= { query }
+				toRecheckList += [ query ]
+	print(f'cleanup: going to recheck {len(toRecheck)} queries in {msgCount} messages: {toRecheck})')
+	cnt=0
+	for i in range(len(toRecheckList)):
+		q = toRecheckList[i]
+		print(f'cleanup: going to recheck query {i + 1}/{len(toRecheck)}: {q})')
+		cnt += await cleanup_retry(msg.channel, q)
+		await asyncio.sleep(1)
+	await msg.channel.send(f'finished cleanup: removed {cnt} now-successful')
+
 @client.event
 async def on_message(message):
 	print(json.dumps({"message":{
@@ -200,6 +271,9 @@ async def on_message(message):
 		await message.channel.send('Hello!')
 	if message.content.startswith('!delerr '):
 		await delerr(message)
+		return
+	if message.content.startswith('!cleanup'):
+		await cleanup(message)
 		return
 
 	infoCommandPrefixes = ['lookup', 'info', 'epub', 'link']
