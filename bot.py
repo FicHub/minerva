@@ -13,6 +13,13 @@ from oil import oil # type: ignore
 client = discord.Client()
 db = oil.open()
 
+ETYPE_COLORS = {
+		'epub': discord.Colour.blue(),
+		'html': discord.Colour.gold(),
+		'mobi': discord.Colour.green(),
+		'pdf': discord.Colour.red(),
+	}
+
 API_PREFIX = 'https://fichub.net/api/v0/epub?q='
 
 def lookup(query: str):
@@ -120,6 +127,8 @@ async def sendFicInfo(channel, l: RequestLog):
 		else:
 			desc = desc2 + desc
 		e = discord.Embed(title=title, description=desc, url=url)
+		if l.etype in ETYPE_COLORS:
+			e.colour = ETYPE_COLORS[l.etype]
 		await channel.send(msg, embed=e)
 		return True
 	except Exception as e:
