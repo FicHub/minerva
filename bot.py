@@ -160,6 +160,24 @@ async def sendErrorLog(channel, l: RequestLog):
 		print(e)
 		print('sendErrorLog: error: unable to report error :( ^')
 
+async def delerr_q(chan, errq) -> int:
+	print(f'delerr_q({errq})')
+	cnt=0
+	async for pm in chan.history(limit=500):
+		if pm.author == client.user and pm.content.find(errq) >= 0:
+			await pm.delete()
+			cnt += 1
+	return cnt
+
+async def delerr(msg) -> None:
+	prefix = '!delerr '
+	if not msg.content.startswith(prefix):
+		return
+	errq = msg.content[len(prefix):].strip()
+	cnt = await delerr_q(msg.channel, errq)
+	await msg.channel.send(f'deleted {cnt} matching messages')
+	return
+
 @client.event
 async def on_message(message):
 	print(json.dumps({"message":{
@@ -171,6 +189,10 @@ async def on_message(message):
 
 	if message.content.startswith('!test'):
 		await message.channel.send('Hello!')
+	if message.content.startswith('!delerr '):
+		await delerr(message)
+		return
+
 	infoCommandPrefixes = ['lookup', 'info', 'epub', 'link']
 	for pre in infoCommandPrefixes:
 		if message.content.startswith(f"!{pre}"):
