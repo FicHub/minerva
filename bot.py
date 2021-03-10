@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Dict
+from typing import Dict, Set, List
 import re
 import sys
 import json
@@ -232,8 +232,8 @@ async def cleanup(msg) -> None:
 			'harrypotterfanfiction.com/',
 			'(?:[^\.]*).adult-fanfiction.org/story.php?'
 		]
-	toRecheck = set()
-	toRecheckList = []
+	toRecheck: Set[str] = set()
+	toRecheckList: List[str] = []
 	msgCount = 0
 	async for pm in msg.channel.history(limit=500):
 		if pm.author != client.user:
