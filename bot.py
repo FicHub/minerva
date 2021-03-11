@@ -272,12 +272,24 @@ async def cleanup(msg) -> None:
 
 @client.event
 async def on_message(message):
-	print(json.dumps({"message":{
-		"author":str(message.author),
-		"content":str(message.content),
-	}}))
 	if message.author == client.user:
 		return
+
+	mdict = {"message":{
+		"author":str(message.author),
+		"content":str(message.clean_content),
+		"id":str(message.id),
+		"created_at":str(message.created_at),
+	}}
+
+	if isinstance(message.channel, discord.DMChannel):
+		mdict["channel"] = {"id":message.channel.id,"dm":True}
+	else:
+		mdict["channel"] = {
+				"id":message.channel.id, "dm":False,
+				"name":message.channel.name
+			}
+	print(json.dumps(mdict))
 
 	if message.content.startswith('!test'):
 		await message.channel.send('Hello!')
