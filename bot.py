@@ -32,12 +32,14 @@ def lookup(query: str):
 	except:
 		return {'error':-1,'msg':'lookup failed :('}
 
-def automatedLookup(query: str):
-	import requests
+async def automatedLookup(query: str):
 	try:
-		req = requests.get(API_AUTO_PREFIX + query)
-		res = req.json()
-		return res
+		import aiohttp
+		url = API_AUTO_PREFIX + query
+		async with aiohttp.request(method="GET", url=url) as resp:
+			resp.raise_for_status()
+			body = await resp.text()
+			return json.loads(body)
 	except:
 		return {'error':-1,'msg':'lookup failed :('}
 
@@ -206,7 +208,7 @@ async def delerr(msg) -> None:
 async def cleanup_retry(chan, q) -> int:
 	print(f'cleanup_retry({q})')
 	try:
-		lr = automatedLookup(q)
+		lr = await automatedLookup(q)
 		if 'err' in lr and int(lr['err']) != 0:
 			return 0
 		if 'error' in lr and int(lr['error']) != 0:
