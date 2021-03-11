@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Dict, Set, List
+from typing import Set, List
 import re
 import sys
 import json
@@ -12,7 +12,6 @@ import asyncio
 from oil import oil # type: ignore
 
 client = discord.Client()
-db = oil.open()
 
 ETYPE_COLORS = {
 		'epub': discord.Colour.blue(),
@@ -79,7 +78,7 @@ class RequestLog:
 
 	@staticmethod
 	def maxId() -> int:
-		with db.cursor() as curs:
+		with oil.open() as db, db.cursor() as curs:
 			curs.execute('select max(id) from requestLog')
 			r = curs.fetchone()
 			return r[0]
@@ -87,20 +86,26 @@ class RequestLog:
 
 	@staticmethod
 	def fetchAfter(after):
-		with db.cursor() as curs:
+		with oil.open() as db, db.cursor() as curs:
 			curs.execute('''
 				select r.id, r.created, r.sourceId, r.etype, r.query, r.infoRequestMs,
 					r.urlId, r.ficInfo, r.exportMs, r.exportFileName, r.exportFileHash,
 					r.url
 				from requestLog r
-				where id > %s''', (after,))
+				where id > %s and (r.exportFileHash is null or not exists (
+					select 1
+					from requestLog r2
+					where r2.exportFileHash = r.exportFileHash
+						and r2.id < r.id
+				))
+				''', (after,))
 			ls = [RequestLog(*r) for r in curs.fetchall()]
 			return ls
 		return []
 
 	@staticmethod
 	def mostRecentByUrlId(urlId):
-		with db.cursor() as curs:
+		with oil.open() as db, db.cursor() as curs:
 			curs.execute('''
 			select r.id, r.created, r.sourceId, r.etype, r.query, r.infoRequestMs,
 				r.urlId, r.ficInfo, r.exportMs, r.exportFileName, r.exportFileHash,
@@ -316,26 +321,6 @@ async def on_message(message):
 		print(e)
 		print('error: ^')
 
-def pruneRecent(recent, minutes=60*24*30):
-	nr = {}
-	old = (datetime.datetime.now() - datetime.timedelta(minutes=minutes))
-	for key in recent:
-		if recent[key] < old:
-			continue
-		nr[key] = recent[key]
-	return nr
-
-def initHashes(maxId: int):
-	recentHashes: Dict[str, int] = {}
-	for l in RequestLog.fetchAfter(0):
-		h = l.exportFileHash
-		if l.id > maxId:
-			continue
-		if h not in recentHashes:
-			recentHashes[h] = l.created
-		recentHashes[h] = max(l.created, recentHashes[h])
-	return recentHashes
-
 async def watch_requests():
 	await client.wait_until_ready()
 	botspam_priv = client.get_channel(754481638695501866) # #botspam-priv
@@ -346,33 +331,19 @@ async def watch_requests():
 	if len(sys.argv) > 1 and sys.argv[1].isnumeric():
 		maxId = int(sys.argv[1])
 		print(f'set maxId to {maxId} from cli')
-	recentHashes = initHashes(maxId)
-	print(f'recentHashes after  init: {len(recentHashes)}')
-	recentHashes = pruneRecent(recentHashes)
-	print(f'recentHashes after prune: {len(recentHashes)}')
 
 	await botspam_priv.send('started up')
 	while not client.is_closed():
-		recentHashes = pruneRecent(recentHashes)
-
 		await asyncio.sleep(3)
 		ls = RequestLog.fetchAfter(maxId)
-		if len(ls) > 0:
-			print(f'len(ls): {len(ls)}')
 		for l in ls:
 			maxId = max(maxId, l.id)
-			if l.exportFileHash is not None:
-				if l.exportFileHash in recentHashes:
-					continue
-				else:
-					recentHashes[l.exportFileHash] = l.created
 
-			print(f'requestId: {l.id}')
 			if l.exportFileHash is None:
 				await sendErrorLog(botspam_err, l)
 				continue
 
-			await sendDevFicInfo(botspam_priv, l)
+			#await sendDevFicInfo(botspam_priv, l)
 
 			rs = RequestSource.select(l.sourceId)
 			if not rs.isAutomated:
