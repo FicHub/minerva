@@ -239,6 +239,11 @@ async def cleanup(msg) -> None:
 			'harrypotterfanfiction.com/',
 			'(?:[^\.]*).adult-fanfiction.org/story.php?'
 		]
+	if msg.content.startswith(prefix + ' '):
+		arg = msg.content[len(prefix) + 1:]
+		validPrefixes = [p for p in validPrefixes if p.find(arg) >= 0]
+		plog(f'cleanup: limited validPrefixes to: {validPrefixes}')
+
 	toRecheck: Set[str] = set()
 	toRecheckList: List[str] = []
 	msgCount = 0
