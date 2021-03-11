@@ -7,9 +7,18 @@ import traceback
 import urllib.parse
 import datetime
 from bs4 import BeautifulSoup # type: ignore
+import logging
 import discord # type: ignore
 import asyncio
 from oil import oil # type: ignore
+
+logging.basicConfig(
+		level=logging.INFO,
+		handlers=[
+			logging.FileHandler("minerva.log"),
+			logging.StreamHandler(),
+		],
+	)
 
 client = discord.Client()
 
@@ -22,6 +31,9 @@ ETYPE_COLORS = {
 
 API_PREFIX = 'https://fichub.net/api/v0/epub?q='
 API_AUTO_PREFIX = 'https://fichub.net/api/v0/epub?automated=true&q='
+
+def plog(msg: str) -> None:
+	logging.info(msg)
 
 def lookup(query: str):
 	import requests
@@ -122,7 +134,7 @@ class RequestLog:
 
 @client.event
 async def on_ready():
-	print('We have logged in as {0.user}'.format(client))
+	plog(f'We have logged in as {client.user}')
 
 def escape_msg(msg: str) -> str:
 	return discord.utils.escape_mentions(discord.utils.escape_markdown(msg))
@@ -150,9 +162,7 @@ async def sendFicInfo(channel, l: RequestLog):
 		await channel.send(msg, embed=e)
 		return True
 	except Exception as e:
-		traceback.print_exc()
-		print(e)
-		print('sendFicInfo: error: ^')
+		plog(f'sendFicInfo: error: {e}\n{traceback.format_exc()}')
 	return False
 
 async def sendDevFicInfo(channel, l: RequestLog):
@@ -170,12 +180,10 @@ async def sendDevFicInfo(channel, l: RequestLog):
 	try:
 		await channel.send(msg)
 	except Exception as e:
-		traceback.print_exc()
-		print(e)
-		print('sendDevFicInfo: error: ^')
+		plog(f'sendDevFicInfo: error: {e}\n{traceback.format_exc()}')
 
 async def sendErrorLog(channel, l: RequestLog):
-	print(f'failed request {l.id}')
+	plog(f'failed request {l.id}')
 	try:
 		msg = f'failed request {l.id}: ```' + str(l.__dict__)
 		while len(msg) > 1800:
@@ -183,12 +191,10 @@ async def sendErrorLog(channel, l: RequestLog):
 			msg = '```' + msg[1800:]
 		await channel.send(msg + '```')
 	except Exception as e:
-		traceback.print_exc()
-		print(e)
-		print('sendErrorLog: error: unable to report error :( ^')
+		plog(f'sendErrorLog: error: unable to report error: {e}\n{traceback.format_exc()}')
 
 async def delerr_q(chan, errq) -> int:
-	print(f'delerr_q({errq})')
+	plog(f'delerr_q({errq})')
 	cnt=0
 	async for pm in chan.history(limit=500):
 		if pm.author == client.user and pm.content.find(errq) >= 0:
@@ -206,7 +212,7 @@ async def delerr(msg) -> None:
 	return
 
 async def cleanup_retry(chan, q) -> int:
-	print(f'cleanup_retry({q})')
+	plog(f'cleanup_retry({q})')
 	try:
 		lr = await automatedLookup(q)
 		if 'err' in lr and int(lr['err']) != 0:
@@ -215,9 +221,9 @@ async def cleanup_retry(chan, q) -> int:
 			return 0
 	except:
 		return 0
-	print(f'cleanup_retry({q}): now successful, deleting old errors')
+	plog(f'cleanup_retry({q}): now successful, deleting old errors')
 	cnt=await delerr_q(chan, f", 'query': '{q}', ")
-	print(f'cleanup_retry({q}): now successful, deleted {cnt} old errors')
+	plog(f'cleanup_retry({q}): now successful, deleted {cnt} old errors')
 	return cnt
 
 async def cleanup(msg) -> None:
@@ -261,11 +267,11 @@ async def cleanup(msg) -> None:
 					continue
 				toRecheck |= { query }
 				toRecheckList += [ query ]
-	print(f'cleanup: going to recheck {len(toRecheck)} queries in {msgCount} messages: {toRecheck})')
+	plog(f'cleanup: going to recheck {len(toRecheck)} queries in {msgCount} messages: {toRecheck})')
 	cnt=0
 	for i in range(len(toRecheckList)):
 		q = toRecheckList[i]
-		print(f'cleanup: going to recheck query {i + 1}/{len(toRecheck)}: {q})')
+		plog(f'cleanup: going to recheck query {i + 1}/{len(toRecheck)}: {q})')
 		cnt += await cleanup_retry(msg.channel, q)
 		await asyncio.sleep(1)
 	await msg.channel.send(f'finished cleanup: removed {cnt} now-successful')
@@ -289,7 +295,7 @@ async def on_message(message):
 				"id":message.channel.id, "dm":False,
 				"name":message.channel.name
 			}
-	print(json.dumps(mdict))
+	plog(json.dumps(mdict))
 
 	if message.content.startswith('!test'):
 		await message.channel.send('Hello!')
@@ -316,9 +322,7 @@ async def on_message(message):
 	except Exception as e:
 		await message.channel.send(f"unable to lookup '{query}'")
 		await message.add_reaction('❌')
-		traceback.print_exc()
-		print(e)
-		print('error: ^')
+		plog(f'on_message: error: {e}\n{traceback.format_exc()}')
 
 	# FIXME why do we need this client param?
 	await message.remove_reaction('👍', client.user)
@@ -326,7 +330,7 @@ async def on_message(message):
 			or ('error' in res and int(res['error']) != 0):
 		await message.channel.send(f"unable to lookup '{query}'")
 		await message.add_reaction('❌')
-		print(res)
+		plog(res)
 		return
 
 	try:
@@ -336,9 +340,7 @@ async def on_message(message):
 	except Exception as e:
 		await message.channel.send(f"unable to find lookup result for '{query}'")
 		await message.add_reaction('❌')
-		traceback.print_exc()
-		print(e)
-		print('error: ^')
+		plog(f'on_message: error: {e}\n{traceback.format_exc()}')
 
 async def watch_requests():
 	await client.wait_until_ready()
@@ -349,7 +351,7 @@ async def watch_requests():
 	maxId = RequestLog.maxId()
 	if len(sys.argv) > 1 and sys.argv[1].isnumeric():
 		maxId = int(sys.argv[1])
-		print(f'set maxId to {maxId} from cli')
+		plog(f'set maxId to {maxId} from cli')
 
 	await botspam_priv.send('started up')
 	while not client.is_closed():
@@ -370,7 +372,7 @@ async def watch_requests():
 
 			await asyncio.sleep(1)
 
-	print('watch_requests: ending')
+	plog('watch_requests: ending')
 
 if __name__ == "__main__":
 	client.loop.create_task(watch_requests())
